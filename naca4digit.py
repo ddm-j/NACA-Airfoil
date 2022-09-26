@@ -77,8 +77,12 @@ class NACA4(object):
 
         d = 1 if upper else -1
 
-        return x - d*self.thickness(x, t)*np.sin(self.theta(x, m, p)), \
-               self.camber(x, m, p) + d*self.thickness(x, t)*np.cos(self.theta(x, m, p)), 0.0
+        if m == 0 and p == 0:
+            return x, d*5*t*(0.2969*np.sqrt(x) - 0.1260*x - 0.3516*x**2 + 0.2843 * x**3 - 0.1015*x**4), 0.0
+
+        else:
+            return x - d*self.thickness(x, t)*np.sin(self.theta(x, m, p)), \
+                   self.camber(x, m, p) + d*self.thickness(x, t)*np.cos(self.theta(x, m, p)), 0.0
 
 
     def foil_discret(self, p, points, method='linear'):
