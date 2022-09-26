@@ -1,9 +1,36 @@
 import numpy as np
 from matplotlib import pyplot as plt
 
+def get_intersect(a1, a2, b1, b2):
+    """
+    https://stackoverflow.com/questions/3252194/numpy-and-line-intersections
+    Returns the point of intersection of the lines passing through a2,a1 and b2,b1.
+    a1: [x, y] a point on the first line
+    a2: [x, y] another point on the first line
+    b1: [x, y] a point on the second line
+    b2: [x, y] another point on the second line
+    """
+    s = np.vstack([a1,a2,b1,b2])        # s for stacked
+    h = np.hstack((s, np.ones((4, 1)))) # h for homogeneous
+    l1 = np.cross(h[0], h[1])           # get first line
+    l2 = np.cross(h[2], h[3])           # get second line
+    x, y, z = np.cross(l1, l2)          # point of intersection
+    if z == 0:                          # lines are parallel
+        return (float('inf'), float('inf'))
+    return (x/z, y/z)
+
+def rotate_vector(vec, angle):
+
+    R = np.array([
+        [np.cos(angle), -np.sin(angle), 0.0],
+        [np.sin(angle), np.cos(angle), 0.0],
+        [0, 0, 1]
+    ])
+
+    return np.matmul(R, vec)
 class NACA4(object):
 
-    def __init__(self, digits, points=50, path=None, method='linear', save=False):
+    def __init__(self, digits, points=50, path=None, method='linear', save=False, te=None):
 
         # Class Attributes
         self.n_points = 0
@@ -16,8 +43,14 @@ class NACA4(object):
         self.lower = None
         self.ordered_points = None
 
+        te_sup = ['radius', 'linear']
+        if te:
+            if te not in te_sup:
+                raise ValueError("Trailing edge behavior {0} not supported. Options are: {1}".format(te, te_sup))
+        self.te = te
+
         # Create Airfoil
-        self.main(digits, points, path, method, save)
+        self.main(digits, points, path, method, save, te)
 
     def theta(self, x, m, p):
 
@@ -63,8 +96,91 @@ class NACA4(object):
 
         return x
 
+    def trailing_edge(self, upper, lower, behavior):
 
-    def main(self, digits, points, path, method, save):
+        # Trailing Edge Vectors
+        u = upper[-1] - upper[-2]
+        mag_u = np.linalg.norm(u)
+        l = lower[-1] - lower[-2]
+        mag_l = np.linalg.norm(l)
+        u_n = u/mag_u
+        l_n = l/mag_l
+
+        # Suggested Point Spacing for Trailing edge
+        ds = (mag_u + mag_l) / 2
+
+        if behavior == 'linear':
+            # Intersection Point
+            i_x, i_y = get_intersect(upper[-2, 0:2], upper[-1, 0:2], lower[-2, 0:2], lower[-1, 0:2])
+            intersect = np.array([i_x, i_y, 0.0])
+
+            # Get Segment Lengths for divisions, and number of divisions for each
+            du = np.linalg.norm(intersect - upper[-1])
+            nu = round(du/ds)
+            div_u = du/nu
+            dl = np.linalg.norm(intersect - lower[-1])
+            nl = round(dl/ds)
+            div_l = dl/nl
+
+            if nu < 2 or nl < 2:
+                raise Warning("Discretization at the trailing edge is not very good. Try increasing number of points.")
+
+            # Create Equally Spaced Points
+            mag_points_u = div_u*np.array(range(1, nu+1))
+            mag_points_l = div_l*np.array(range(1, nl+1))
+
+            te_upper = np.array([upper[-1] + u_n*i for i in mag_points_u])
+            te_lower = np.array([lower[-1] + l_n*i for i in mag_points_l])
+
+            te_upper[-1] = intersect
+            te_lower[-1] = intersect
+
+        elif behavior == 'radius':
+
+            # Normal vectors to the tangent points
+            normal_u = np.array([u_n[1], -u_n[0], u_n[2]])
+            normal_l = np.array([-l_n[1], l_n[0], l_n[2]])
+            pu2 = upper[-1] + 0.001*normal_u
+            pl2 = lower[-1] + 0.001*normal_l
+
+            # Get Circle Center
+            c_x, c_y = get_intersect(upper[-1, 0:2], pu2[0:2], lower[-1, 0:2], pl2[0:2])
+            c = np.array([c_x, c_y, 0.0])
+            R = np.linalg.norm(upper[-1] - c)
+
+            # Get Angles for Discretization
+            r0 = np.array([1, 0, 0])
+            alpha_u = np.arccos(np.dot(-normal_u, r0))
+            alpha_l = np.arccos(np.dot(r0, -normal_l))
+
+            # Calculate Spacing
+            s_u = R*alpha_u
+            nu = round(s_u / ds)
+            ds_u = s_u / nu
+            dtheta_u = ds_u / R
+            s_l = R*alpha_l
+            nl = round(s_l / ds)
+            ds_l = s_l / nl
+            dtheta_l = ds_l / R
+
+            # Spaced Points
+            R_u = -R*normal_u
+            R_l = -R*normal_l
+            angles_u = -dtheta_u*np.array(range(1, nu+1))
+            angles_l = dtheta_l*np.array(range(1, nl+1))
+
+            # Create Points
+            te_upper = np.array([c + rotate_vector(R_u, i) for i in angles_u])
+            te_lower = np.array([c + rotate_vector(R_l, i) for i in angles_l])
+
+            # Ensure Exact Match
+            te_upper[-1] = c + R*np.array([1, 0, 0])
+            te_lower[-1] = c + R*np.array([1, 0, 0])
+
+        return te_upper, te_lower
+
+
+    def main(self, digits, points, path, method, save, te):
         m = float(digits[0])/100
         p = float(digits[1])/10
         t = float(digits[2:])/100
@@ -76,6 +192,12 @@ class NACA4(object):
         # Calculate the upper and lower profiles
         upper = np.insert(np.array([self.foil(i, m, p, t) for i in x]), 0, np.array([0, 0, 0]), 0)
         lower = np.insert(np.array([self.foil(i, m, p, t, upper=False) for i in x]), 0, np.array([0, 0, 0]), 0)
+
+        # Create the trailing edge discretization
+        if te:
+            te_upper, te_lower = self.trailing_edge(upper, lower, te)
+            upper = np.concatenate((upper, te_upper), axis=0)
+            lower = np.concatenate((lower, te_lower), axis=0)
 
         # Save the files
         if save:
@@ -106,6 +228,8 @@ if __name__ == "__main__":
                         default='linear')
     parser.add_argument('--save', help='Option to save the airfoil coordinates as TXT.',
                         default=True)
+    parser.add_argument('--te', help='Trailing edge behavior: radius, closed. Default closed.',
+                        default=None)
 
     args = parser.parse_args()
 
