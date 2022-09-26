@@ -28,6 +28,8 @@ def rotate_vector(vec, angle):
     ])
 
     return np.matmul(R, vec)
+
+
 class NACA4(object):
 
     def __init__(self, digits, points=50, path=None, method='linear', save=False, te=None):
