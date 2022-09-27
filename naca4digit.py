@@ -32,7 +32,7 @@ def rotate_vector(vec, angle):
 
 class NACA4(object):
 
-    def __init__(self, digits, points=50, path=None, method='linear', save=False, te=None):
+    def __init__(self, digits, points=50, path=None, method='linear', save=False, te=None, tepoints=None, centered=False):
 
         # Class Attributes
         self.n_points = 0
@@ -52,7 +52,7 @@ class NACA4(object):
         self.te = te
 
         # Create Airfoil
-        self.main(digits, points, path, method, save, te)
+        self.main(digits, points, path, method, save, te, tepoints, centered)
 
     def theta(self, x, m, p):
 
@@ -89,10 +89,12 @@ class NACA4(object):
 
     def foil_discret(self, p, points, method='linear'):
 
+        #points = points + 2
+
         if method=='linear':
             x = np.linspace(0, 1, points)
         elif method=='log':
-            first = np.geomspace(0.001, p, num=points//2)
+            first = np.geomspace(1e-8, p, num=points//2)
             second = np.flip(1 - np.geomspace(0.001, 1-p, num=points//2))
 
             x = np.concatenate([first, second[1:]])
@@ -102,7 +104,7 @@ class NACA4(object):
 
         return x
 
-    def trailing_edge(self, upper, lower, behavior):
+    def trailing_edge(self, upper, lower, behavior, points=None):
 
         # Trailing Edge Vectors
         u = upper[-1] - upper[-2]
@@ -123,9 +125,20 @@ class NACA4(object):
             # Get Segment Lengths for divisions, and number of divisions for each
             du = np.linalg.norm(intersect - upper[-1])
             nu = round(du/ds)
-            div_u = du/nu
             dl = np.linalg.norm(intersect - lower[-1])
             nl = round(dl/ds)
+
+            if points:
+                nl = points
+                nu = points
+
+            elif nu == 0 or nl == 0:
+                te_upper = intersect.reshape((1, 3))
+                te_lower = intersect.reshape((1, 3))
+
+                return te_upper, te_lower
+
+            div_u = du/nu
             div_l = dl/nl
 
             if nu < 2 or nl < 2:
@@ -162,16 +175,29 @@ class NACA4(object):
             # Calculate Spacing
             s_u = R*alpha_u
             nu = round(s_u / ds)
-            ds_u = s_u / nu
-            dtheta_u = ds_u / R
             s_l = R*alpha_l
             nl = round(s_l / ds)
+
+            if points:
+                nl = points
+                nu = points
+
+            elif nu == 0 or nl == 0:
+                te_upper = (c + R*r0).reshape((1, 3))
+                te_lower = (c + R*r0).reshape((1, 3))
+
+                return te_upper, te_lower
+
+            ds_u = s_u / nu
+            dtheta_u = ds_u / R
+
             ds_l = s_l / nl
             dtheta_l = ds_l / R
 
             # Spaced Points
             R_u = -R*normal_u
             R_l = -R*normal_l
+
             angles_u = -dtheta_u*np.array(range(1, nu+1))
             angles_l = dtheta_l*np.array(range(1, nl+1))
 
@@ -185,8 +211,7 @@ class NACA4(object):
 
         return te_upper, te_lower
 
-
-    def main(self, digits, points, path, method, save, te):
+    def main(self, digits, points, path, method, save, te, tepoints, centered):
         m = float(digits[0])/100
         p = float(digits[1])/10
         t = float(digits[2:])/100
@@ -201,9 +226,15 @@ class NACA4(object):
 
         # Create the trailing edge discretization
         if te:
-            te_upper, te_lower = self.trailing_edge(upper, lower, te)
+            print('Creating trailing edge. TE points: {0}'.format(tepoints))
+            te_upper, te_lower = self.trailing_edge(upper, lower, behavior=te, points=tepoints)
             upper = np.concatenate((upper, te_upper), axis=0)
             lower = np.concatenate((lower, te_lower), axis=0)
+
+        # Center the Airfoil coordinates
+        if centered:
+            upper[:, 0] -= 0.5
+            lower[:, 0] -= 0.5
 
         # Save the files
         if save:
@@ -236,6 +267,10 @@ if __name__ == "__main__":
                         default=True)
     parser.add_argument('--te', help='Trailing edge behavior: radius, closed. Default closed.',
                         default=None)
+    parser.add_argument('--tepoints', help='Trailing edge discretization point count override.',
+                        default=None)
+    parser.add_argument('--centered', help='Center the airfoil such that the origin is at mid-cord.',
+                        default=False)
 
     args = parser.parse_args()
 
