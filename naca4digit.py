@@ -32,7 +32,7 @@ def rotate_vector(vec, angle):
 
 class NACA4(object):
 
-    def __init__(self, digits, points=50, path=None, method='linear', save=False, te=None, tepoints=None, centered=False):
+    def __init__(self, digits, points=50, path=None, method='linear', save=False, te=None, tepoints=None, centered=False, plot=False):
 
         # Class Attributes
         self.n_points = 0
@@ -52,7 +52,7 @@ class NACA4(object):
         self.te = te
 
         # Create Airfoil
-        self.main(digits, points, path, method, save, te, tepoints, centered)
+        self.main(digits, points, path, method, save, te, tepoints, centered, plot)
 
     def theta(self, x, m, p):
 
@@ -91,16 +91,19 @@ class NACA4(object):
 
         #points = points + 2
 
-        if method=='linear':
+        if method == 'linear':
             x = np.linspace(0, 1, points)
-        elif method=='log':
+        elif method == 'cosine':
+            theta = np.linspace(0, np.pi, points)
+            x = (1.0/2)*(1 - np.cos(theta))
+        elif method == 'log':
             first = np.geomspace(1e-8, p, num=points//2)
             second = np.flip(1 - np.geomspace(0.001, 1-p, num=points//2))
 
             x = np.concatenate([first, second[1:]])
         else:
             raise ValueError('Input discretization method \'{0}\' not recognized. Supported '
-                             'methods are \'linear\' and \'log\''.format(method))
+                             'methods are linear, log, and cosine'.format(method))
 
         return x
 
@@ -211,7 +214,7 @@ class NACA4(object):
 
         return te_upper, te_lower
 
-    def main(self, digits, points, path, method, save, te, tepoints, centered):
+    def main(self, digits, points, path, method, save, te, tepoints, centered, plot):
         m = float(digits[0])/100
         p = float(digits[1])/10
         t = float(digits[2:])/100
@@ -226,7 +229,6 @@ class NACA4(object):
 
         # Create the trailing edge discretization
         if te:
-            print('Creating trailing edge. TE points: {0}'.format(tepoints))
             te_upper, te_lower = self.trailing_edge(upper, lower, behavior=te, points=tepoints)
             upper = np.concatenate((upper, te_upper), axis=0)
             lower = np.concatenate((lower, te_lower), axis=0)
@@ -245,6 +247,12 @@ class NACA4(object):
                 np.savetxt('{0}_upper.txt'.format(digits), upper, delimiter=' ')
                 np.savetxt('{0}_lower.txt'.format(digits), lower, delimiter=' ')
 
+        # Plotting
+        if plot:
+            plt.scatter(upper[:, 0], upper[:, 1])
+            plt.scatter(lower[:, 0], lower[:, 1])
+            plt.show()
+
         # Add to class
         self.m, self.p, self.t = m, p, t
         self.upper, self.lower = upper, lower
@@ -261,7 +269,7 @@ if __name__ == "__main__":
     parser.add_argument('--points', help='Number of points to use for the airfoil sampling. Default = 100',
                         default=100)
     parser.add_argument('--path', help='Output path for saving the profile.')
-    parser.add_argument('--method', help='Method for discretization of the airfoil surface: linear or log.',
+    parser.add_argument('--method', help='Method for discretization of the airfoil surface: linear, log, or cosine.',
                         default='linear')
     parser.add_argument('--save', help='Option to save the airfoil coordinates as TXT.',
                         default=True)
@@ -271,6 +279,8 @@ if __name__ == "__main__":
                         default=None)
     parser.add_argument('--centered', help='Center the airfoil such that the origin is at mid-cord.',
                         default=False)
+    parser.add_argument('--plot', help='Plot the airfoil coordinates using matplotlib.',
+                        default=False, action='store_true')
 
     args = parser.parse_args()
 
